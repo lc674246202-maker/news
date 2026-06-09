@@ -1,0 +1,9 @@
+.env
+data/cookies.json
+data/xwlb_cache/
+data/analysis_cache/
+output/
+.venv/
+__pycache__/
+*.pyc
+.DS_Store
