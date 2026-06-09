@@ -1,27 +1,12 @@
-# Use Python 3.11 slim image
-FROM python:3.11-slim
+FROM python:3.12-slim
 
-# Set working directory
 WORKDIR /app
 
-# Install uv for faster dependency management
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy project files
-COPY pyproject.toml uv.lock README.md ./
-COPY src ./src
-COPY data ./data
-COPY .env.example .env.example
+COPY . .
 
-# Install dependencies
-RUN uv sync --frozen --no-dev
+EXPOSE 8000
 
-# Create volume mount points
-VOLUME ["/app/data"]
-
-# Set environment variables
-ENV PYTHONUNBUFFERED=1
-
-# Run the application
-ENTRYPOINT ["uv", "run", "horizon"]
-CMD []
+CMD uvicorn server:app --host 0.0.0.0 --port $PORT
