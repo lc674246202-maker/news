@@ -26,7 +26,18 @@ COOKIE_FILE = Path(__file__).parent.parent / "data" / "cookies.json"
 
 
 def load_cookies() -> dict:
-    """从 cookies.json 加载 cookie"""
+    """加载 cookie：优先从环境变量，其次从 cookies.json"""
+    import os
+    cookies = {}
+    # 环境变量优先级最高（用于 Railway 部署）
+    for key in ("zhihu", "weibo", "bilibili"):
+        env_val = os.getenv(f"{key.upper()}_COOKIE")
+        if env_val:
+            cookies[key] = env_val
+    # 如果环境变量有值，直接返回
+    if cookies.get("zhihu") or cookies.get("weibo"):
+        return cookies
+    # 回退到文件
     if not COOKIE_FILE.exists():
         return {}
     try:
