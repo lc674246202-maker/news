@@ -49,6 +49,10 @@ FOREIGN_NAMES = [
 ]
 NEWS_NAMES = ["新闻联播"]
 
+# ── 北京时间 ──
+def _bj_now():
+    return datetime.now(timezone.utc) + timedelta(hours=8)
+
 # ── 工具函数 ──
 def _title(item): return item["title"] if isinstance(item, dict) else (item.title or "无标题")
 def _url(item):   return item["url"]   if isinstance(item, dict) else str(item.url)
@@ -169,7 +173,7 @@ def _render_news_block(source_name, items, color, inner_only=False, analysis_htm
 
 
 def generate_html(domestic, foreign, news, trans, all_items, xwlb_analysis=None):
-    now = datetime.now(timezone.utc).strftime("%m/%d %H:%M")
+    now = _bj_now().strftime("%m/%d %H:%M")
     total = sum(len(v) for v in all_items.values())
     color_list = [
         {"accent":"#e74c3c","light":"#fdf2f2","border":"#f5c6c6","icon":"🔶"},
@@ -336,7 +340,7 @@ body{{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Noto Sans 
     <h1>🌅 新闻看板</h1>
     <span class="credit">感谢 jxtan 和 Thysrael</span>
 </div>
-<div class="update-bar">🕐 上次更新: {datetime.now(timezone.utc).strftime("%H:%M UTC")}</div>
+<div class="update-bar">🕐 上次更新: {_bj_now().strftime("%H:%M 北京时间")}</div>
 <div class="stats">📡 <span>{len(all_items)}</span> 源 · 📰 <span>{total}</span> 条</div>
 <div class="tabs">
     <button class="tab-btn active" onclick="switchTab('domestic',this)">🇨🇳 国内 <span class="tab-count" id="cnt-domestic">{d_count}</span></button>
@@ -429,7 +433,7 @@ async def refresh_data():
                         c = it.get("content","") or ""
                         items.append({"title":it["title"],"url":it["url"],"time":"","meta":c.replace('\n',' ').strip()[:120],"content":c})
                     all_grouped["新闻联播"] = items
-                    run_key = datetime.now(timezone.utc).strftime("%Y%m%d")
+                    run_key = _bj_now().strftime("%Y%m%d")
                     result = analyze_xwlb(items, run_key=run_key)
                     if result and "error" not in result:
                         print(f"   ✅ AI 分析完成")
@@ -457,7 +461,7 @@ async def refresh_data():
             if n in all_grouped: news[n] = all_grouped[n]
 
         _cached_html = generate_html(domestic, foreign, news, translated, all_grouped, xwlb_analysis)
-        _last_update = datetime.now(timezone.utc).strftime("%H:%M UTC")
+        _last_update = _bj_now().strftime("%H:%M 北京时间")
         _refresh_count += 1
         print(f"✅ 刷新完成 - {sum(len(v) for v in all_grouped.values())} 条, {len(all_grouped)} 个源")
     except Exception as e:
@@ -477,7 +481,12 @@ async def lifespan(app: FastAPI):
 
 async def _scheduler():
     while True:
-        await asyncio.sleep(1800)
+        await asyncio.sleep(3600)  # 1 小时刷新一次
+        # 北京时间 23:00~07:00 不刷新（休息时段）
+        now_bj = _bj_now()
+        if now_bj.hour >= 23 or now_bj.hour < 7:
+            print(f"⏰ {now_bj.strftime('%H:%M')} 北京深夜时段，跳过刷新")
+            continue
         try: await refresh_data()
         except: pass
 
