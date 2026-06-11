@@ -25,7 +25,6 @@ from src.models import RSSSourceConfig
 from src.scrapers.rss import RSSScraper
 from scripts.cookie_sources import fetch_all_cookie_sources
 from scripts.xwlb_source import fetch_xwlb
-from scripts.ai_analyzer import analyze_xwlb, format_analysis_html
 
 load_dotenv()
 
@@ -82,23 +81,8 @@ async def translate(text: str, client: httpx.AsyncClient) -> str:
 # ════════════════════════════════════════════
 # HTML 生成函数（从 show_news.py 提取）
 # ════════════════════════════════════════════
-
-def _format_xwlb_brief(text: str) -> str:
-    lines = text.split('\n')
-    html_parts = []
-    for line in lines:
-        line = line.strip()
-        if not line: continue
-        clean = re.sub(r'\s+', ' ', line)
-        if len(clean) < 40 and re.search(r'[。！？]$', clean):
-            html_parts.append(f'<div class="xwlb-brief-item">◆ {clean}</div>')
-        elif len(clean) < 40 and not re.search(r'[。！？，、；：，]', clean[-1]):
-            html_parts.append(f'<div class="xwlb-brief-item">◆ {clean}</div>')
-        else:
-            html_parts.append(f'<span class="xwlb-text">{line}</span>')
-    if not html_parts: return f'<div class="xwlb-text">{text}</div>'
-    return '<div class="xwlb-brief-wrap">' + '\n'.join(html_parts) + '</div>'
-
+# HTML 生成函数
+# ════════════════════════════════════════════
 
 def render_source_block(source_name, items, color, translations=None, inner_only=False, is_news=False, analysis_html=None):
     if is_news:
@@ -138,7 +122,8 @@ def render_source_block(source_name, items, color, translations=None, inner_only
 
 
 def _render_news_block(source_name, items, color, inner_only=False, analysis_html=None):
-    left_html = ""
+    """新闻联播：全屏单列布局"""
+    items_html = ""
     for j, item in enumerate(items):
         title = _title(item)
         url = _url(item)
@@ -146,33 +131,41 @@ def _render_news_block(source_name, items, color, inner_only=False, analysis_htm
         content_clean = re.sub(r'^央视网消息（新闻联播）[：:]\s*', '', content)
         if not content_clean: content_clean = content
         is_brief = '快讯' in title
-        formatted_text = _format_xwlb_brief(content_clean) if is_brief and content_clean else f'<div class="xwlb-text">{content_clean}</div>'
-        left_html += f"""
+
+        left_html = ""
+        if is_brief and content_clean:
+            lines = content_clean.split('\n')
+            for line in lines:
+                line = line.strip()
+                if not line: continue
+                clean = re.sub(r'\s+', ' ', line)
+                if len(clean) < 40 and re.search(r'[。！？]$', clean):
+                    left_html += f'<div class="xwlb-sub-title">◆ {clean}</div>'
+                elif len(clean) < 40 and not re.search(r'[。！？，、；：，]', clean[-1]):
+                    left_html += f'<div class="xwlb-sub-title">◆ {clean}</div>'
+                else:
+                    left_html += f'<div class="xwlb-text">{line}</div>'
+        else:
+            left_html = f'<div class="xwlb-text">{content_clean}</div>'
+
+        items_html += f"""
         <div class="xwlb-item{' xwlb-brief' if is_brief else ''}">
             <div class="xwlb-num">{j+1}</div>
             <div class="xwlb-body">
                 <a class="xwlb-title" href="{url}" target="_blank" rel="noopener">{title}</a>
-                {formatted_text}
+                {left_html}
             </div>
         </div>"""
-    _fallback = '<div class="xwlb-ai-placeholder"><div class="xwlb-ai-icon">\U0001f9e0</div><div class="xwlb-ai-text">AI 分析功能尚未接入</div><div class="xwlb-ai-hint">接入后将自动生成新闻摘要、分类、关键词等</div></div>'
-    ai_col = analysis_html or _fallback
+
     inner = f"""
-    <div class="xwlb-layout">
-        <div class="xwlb-col xwlb-original">
-            <div class="xwlb-col-header">\U0001f4f0 新闻联播原文</div>
-            <div class="xwlb-list">{left_html}</div>
-        </div>
-        <div class="xwlb-col xwlb-ai">
-            <div class="xwlb-col-header">\U0001f916 AI 分析</div>
-            {ai_col}
-        </div>
-    </div>"""
+    <div class="xwlb-header">📰 新闻联播 — {_bj_now().strftime("%m月%d日")}</div>
+    <div class="xwlb-list-full">{items_html}</div>"""
+
     if inner_only: return inner
-    return f'<div class="col" style="--a:{color["accent"]};--l:{color["light"]};--b:{color["border"]}">{inner}</div>'
+    return f'<div class="col xwlb-full-col" style="--a:{color["accent"]};--l:{color["light"]};--b:{color["border"]}">{inner}</div>'
 
 
-def generate_html(domestic, foreign, news, trans, all_items, xwlb_analysis=None):
+def generate_html(domestic, foreign, news, trans, all_items):
     now = _bj_now().strftime("%m/%d %H:%M")
     total = sum(len(v) for v in all_items.values())
     color_list = [
@@ -227,7 +220,7 @@ def generate_html(domestic, foreign, news, trans, all_items, xwlb_analysis=None)
         else: tab = "foreign"
         source_dat[name] = {
             "inner": render_source_block(name, items, c, trans.get(name), inner_only=True,
-                                          is_news=(name in NEWS_NAMES), analysis_html=(xwlb_analysis if name in NEWS_NAMES else None)),
+                                          is_news=(name in NEWS_NAMES)),
             "accent": c['accent'], "light": c['light'], "border": c['border'], "icon": c['icon'],
             "count": len(items), "tab": tab,
         }
@@ -294,40 +287,25 @@ body{{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Noto Sans 
 .item-more{{display:none}}
 .item-more.show{{display:flex}}
 .ft{{text-align:center;padding:14px 0 6px;color:#ccc;font-size:11px}}
-.xwlb-layout{{display:flex;gap:12px;min-height:500px}}
-.xwlb-col{{flex:1;min-width:0;display:flex;flex-direction:column}}
-.xwlb-col-header{{font-size:14px;font-weight:700;padding:8px 12px;background:#fff;border-radius:8px 8px 0 0;border-bottom:2px solid #667eea;color:#333;flex-shrink:0}}
-.xwlb-list{{flex:1;overflow-y:auto;padding:6px;background:#fff;border-radius:0 0 8px 8px}}
-.xwlb-item{{display:flex;gap:8px;padding:10px 12px;margin:4px 0;background:#f8f9fb;border-radius:6px;border-left:3px solid #667eea}}
+.xwlb-full-col{{grid-column:1/-1!important}}
+.xwlb-header{{font-size:16px;font-weight:700;color:#333;padding:10px 14px;background:#fff;border-radius:8px 8px 0 0;border-bottom:2px solid #667eea}}
+.xwlb-list-full{{padding:8px 12px;background:#fff;border-radius:0 0 8px 8px}}
+.xwlb-item{{display:flex;gap:10px;padding:14px 16px;margin:6px 0;background:#f8f9fb;border-radius:8px;border-left:4px solid #667eea}}
 .xwlb-item:hover{{background:#f0f2ff}}
-.xwlb-num{{flex-shrink:0;width:24px;height:24px;border-radius:6px;background:#667eea;color:#fff;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700}}
+.xwlb-num{{flex-shrink:0;width:28px;height:28px;border-radius:7px;background:#667eea;color:#fff;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700}}
 .xwlb-body{{flex:1;min-width:0}}
-.xwlb-title{{display:block;font-size:14px;font-weight:600;color:#1a1a2e;text-decoration:none;margin-bottom:6px;line-height:1.4}}
+.xwlb-title{{display:block;font-size:15px;font-weight:600;color:#1a1a2e;text-decoration:none;margin-bottom:8px;line-height:1.5}}
 .xwlb-title:hover{{color:#667eea}}
-.xwlb-text{{font-size:13px;color:#555;line-height:1.7;white-space:pre-wrap;word-break:break-word}}
-.xwlb-ai-placeholder{{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;background:#fff;border-radius:0 0 8px 8px;padding:40px 20px;color:#bbb}}
-.xwlb-ai-icon{{font-size:48px;margin-bottom:12px}}
-.xwlb-ai-text{{font-size:15px;font-weight:600;color:#999;margin-bottom:6px}}
-.xwlb-ai-hint{{font-size:12px;color:#ccc}}
-.xwlb-ai-content{{padding:8px 6px;flex:1;overflow-y:auto;background:#fff;border-radius:0 0 8px 8px}}
-.xwlb-ai-section{{margin-bottom:12px}}
-.xwlb-ai-section-title{{font-size:13px;font-weight:700;color:#333;margin-bottom:6px;padding:4px 8px;background:#f0f2ff;border-radius:4px}}
-.xwlb-ai-overview{{font-size:13px;color:#555;line-height:1.6;padding:6px 8px}}
-.xwlb-ai-themes{{display:flex;flex-wrap:wrap;gap:6px;padding:4px 8px}}
-.xwlb-ai-tag{{display:inline-block;padding:3px 10px;border-radius:12px;font-size:12px;font-weight:500;background:#e8ecf8;color:#4a5a9a}}
-.xwlb-ai-item{{padding:8px;margin:4px 0;background:#f8f9fb;border-radius:6px}}
-.xwlb-ai-item-header{{display:flex;align-items:center;gap:6px;margin-bottom:4px}}
-.xwlb-ai-idx{{font-weight:700;color:#667eea;font-size:12px}}
-.xwlb-ai-cat{{font-size:11px;padding:1px 8px;border-radius:8px;background:#e8ecf8;color:#4a5a9a}}
-.xwlb-ai-summary{{font-size:13px;color:#444;line-height:1.5;margin-bottom:4px;font-weight:500}}
-.xwlb-ai-analysis{{font-size:12px;color:#666;line-height:1.6;margin:4px 0 4px;padding:6px 8px;background:#f0f4ff;border-radius:4px;border-left:3px solid #667eea}}
-.xwlb-ai-kws{{display:flex;flex-wrap:wrap;gap:4px}}
-.xwlb-ai-kw{{display:inline-block;font-size:11px;padding:1px 7px;border-radius:4px;background:#e6f7e6;color:#389e0d}}
+.xwlb-text{{font-size:14px;color:#444;line-height:1.8;white-space:pre-wrap;word-break:break-word}}
+.xwlb-sub-title{{font-weight:700;color:#92400e;font-size:14px;padding:5px 0 3px 0;border-bottom:1px dashed #fde68a;margin:6px 0 4px 0}}
+.xwlb-full-col{{grid-column:1/-1!important}}
+.xwlb-header{{font-size:16px;font-weight:700;color:#333;padding:10px 14px;background:#fff;border-radius:8px 8px 0 0;border-bottom:2px solid #667eea}}
+.xwlb-list-full{{padding:8px 12px;background:#fff;border-radius:0 0 8px 8px}}
 .xwlb-brief{{border-left-color:#f59e0b!important;background:#fffbeb!important}}
 .xwlb-brief .xwlb-title{{color:#d97706}}
 .xwlb-brief-wrap{{font-size:13px;line-height:1.7}}
 .xwlb-brief-item{{font-weight:700;color:#92400e;padding:4px 0 2px 0;font-size:13px;border-bottom:1px dashed #fde68a;margin:4px 0}}
-@media(max-width:900px){{.sidebar{{display:none}}.main{{padding:10px}}.xwlb-layout{{flex-direction:column}}}}
+@media(max-width:900px){{.sidebar{{display:none}}.main{{padding:10px}}}}
 </style>
 </head>
 <body>
@@ -387,7 +365,6 @@ async def refresh_data():
         print(f"\n🔄 刷新 #{_refresh_count + 1} - {datetime.now().strftime('%H:%M:%S')}")
         all_grouped = {}
         translated = {}
-        xwlb_analysis = None
 
         rss_sources = [
             RSSSourceConfig(name="Hacker News", url="https://hnrss.org/frontpage"),
@@ -433,11 +410,7 @@ async def refresh_data():
                         c = it.get("content","") or ""
                         items.append({"title":it["title"],"url":it["url"],"time":"","meta":c.replace('\n',' ').strip()[:120],"content":c})
                     all_grouped["新闻联播"] = items
-                    run_key = _bj_now().strftime("%Y%m%d")
-                    result = analyze_xwlb(items, run_key=run_key)
-                    if result and "error" not in result:
-                        print(f"   ✅ AI 分析完成")
-                    xwlb_analysis = format_analysis_html(result)
+                    print(f"   📺 新闻联播 {len(items)} 条")
             except Exception as e: print(f"   📺 新闻联播: {e}")
 
         foreign_set = set(FOREIGN_NAMES)
@@ -460,7 +433,7 @@ async def refresh_data():
         for n in NEWS_NAMES:
             if n in all_grouped: news[n] = all_grouped[n]
 
-        _cached_html = generate_html(domestic, foreign, news, translated, all_grouped, xwlb_analysis)
+        _cached_html = generate_html(domestic, foreign, news, translated, all_grouped)
         _last_update = _bj_now().strftime("%H:%M 北京时间")
         _refresh_count += 1
         print(f"✅ 刷新完成 - {sum(len(v) for v in all_grouped.values())} 条, {len(all_grouped)} 个源")
